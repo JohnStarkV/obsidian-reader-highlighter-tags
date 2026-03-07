@@ -144,9 +144,6 @@ var FloatingManager = class {
   load() {
     this.createElements();
     this.registerEvents();
-    if (import_obsidian.Platform.isMobile) {
-      this.setupMobileGestures();
-    }
   }
   unload() {
     var _a;
@@ -250,30 +247,7 @@ var FloatingManager = class {
       btn.addEventListener("touchstart", handler, { passive: false });
     });
   }
-  setupMobileGestures() {
-    document.addEventListener("touchstart", (e) => {
-      this.longPressTimer = setTimeout(() => {
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
-        const sel = window.getSelection();
-        if (view && view.getMode() === "preview" && (sel == null ? void 0 : sel.toString().trim())) {
-          this.plugin.highlightSelection(view);
-          this.hide();
-        }
-      }, 600);
-    }, { passive: true });
-    document.addEventListener("touchmove", () => {
-      if (this.longPressTimer) {
-        clearTimeout(this.longPressTimer);
-        this.longPressTimer = null;
-      }
-    }, { passive: true });
-    document.addEventListener("touchend", () => {
-      if (this.longPressTimer) {
-        clearTimeout(this.longPressTimer);
-        this.longPressTimer = null;
-      }
-    }, { passive: true });
-  }
+
   handleSelection() {
     var _a;
     const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
@@ -1035,6 +1009,27 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     this.registerCommands();
     this.registerDomEvent(document, "selectionchange", () => {
       this.floatingManager.handleSelection();
+    });
+    this.registerDomEvent(document, "click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement))
+        return;
+      const markEl = target.closest("mark");
+      if (!markEl)
+        return;
+      const view = this.getActiveReadingView();
+      if (!view)
+        return;
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed)
+        return;
+      const previewEl = view.containerEl.querySelector(".markdown-reading-view") || view.containerEl.querySelector(".markdown-preview-view");
+      if (!previewEl || !previewEl.contains(markEl))
+        return;
+      const range = document.createRange();
+      range.selectNodeContents(markEl);
+      sel.removeAllRanges();
+      sel.addRange(range);
     });
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
