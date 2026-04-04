@@ -435,6 +435,52 @@
     }
 }
 
+/* === Android-Specific Enhancements === */
+/* Larger touch targets and higher contrast for Android devices */
+.is-android .reading-highlighter-float-container {
+    gap: 10px;
+    /* Subtle container background so buttons stand out better */
+    background: rgba(30, 30, 30, 0.45);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-radius: 28px;
+    padding: 6px 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.is-android.theme-light .reading-highlighter-float-container {
+    background: rgba(240, 240, 240, 0.7);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.is-android .reading-highlighter-btn {
+    width: 48px;
+    height: 48px;
+    /* Higher opacity for better visibility */
+    background: rgba(80, 80, 80, 0.95);
+}
+
+.is-android.theme-light .reading-highlighter-btn {
+    background: rgba(200, 200, 200, 0.98);
+}
+
+.is-android .reading-highlighter-color-btn {
+    width: 36px;
+    height: 36px;
+}
+
+.is-android .reading-highlighter-btn svg,
+.is-android .reading-highlighter-btn .svg-icon {
+    width: 22px;
+    height: 22px;
+}
+
+/* Vertical layout: also apply container styling */
+.is-android .reading-highlighter-vertical {
+    border-radius: 24px;
+    padding: 10px 6px;
+}
+
 /* === Mobile: Push annotation modal to top when keyboard is open === */
 /* Force position using !important to override element-level styles from Obsidian */
 

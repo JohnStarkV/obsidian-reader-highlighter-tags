@@ -16,6 +16,13 @@ export class FloatingManager {
 
         // Mobile gesture state
         this.longPressTimer = null;
+
+        // Android selection debounce
+        this._selectionDebounceTimer = null;
+
+        // Selection snapshot — cached when toolbar is shown so actions can use it
+        // even if Android clears the native selection on touchstart
+        this._selectionSnapshot = null;
     }
 
     load() {
@@ -31,6 +38,10 @@ export class FloatingManager {
         this.containerEl = null;
         this._handlers.forEach(cleanup => cleanup());
         this._handlers = [];
+        if (this._selectionDebounceTimer) {
+            clearTimeout(this._selectionDebounceTimer);
+            this._selectionDebounceTimer = null;
+        }
     }
 
     refresh() {
@@ -124,7 +135,9 @@ export class FloatingManager {
                 preventFocus(evt);
                 const view = this.app.workspace.getActiveViewOfType(MarkdownView);
                 if (view && view.getMode() === "preview") {
-                    this.plugin[actionName](view);
+                    // On Android, pass the cached selection snapshot
+                    // because the native selection may be cleared by this point
+                    this.plugin[actionName](view, this._selectionSnapshot);
                 }
                 this.hide();
             };
@@ -146,7 +159,7 @@ export class FloatingManager {
                 preventFocus(evt);
                 const view = this.app.workspace.getActiveViewOfType(MarkdownView);
                 if (view && view.getMode() === "preview") {
-                    this.plugin.applyColorByIndex(view, index);
+                    this.plugin.applyColorByIndex(view, index, this._selectionSnapshot);
                 }
                 this.hide();
             };
@@ -158,6 +171,10 @@ export class FloatingManager {
 
     setupMobileGestures() {
         // Long press to highlight without showing toolbar
+        // Only enable on iOS — on Android this races with the native selection
+        // behaviour and causes partial (single-word) highlights.
+        if (!Platform.isIosApp) return;
+
         document.addEventListener("touchstart", (e) => {
             this.longPressTimer = setTimeout(() => {
                 const view = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -185,7 +202,29 @@ export class FloatingManager {
         }, { passive: true });
     }
 
+    /**
+     * Called on every `selectionchange` event.
+     * On Android the event fires per-word during a drag, so we debounce it
+     * to wait for the selection to settle before showing the toolbar.
+     * On iOS/Desktop we keep the original instant behaviour.
+     */
     handleSelection() {
+        if (Platform.isAndroidApp) {
+            // Debounce: wait for selection to stabilise
+            if (this._selectionDebounceTimer) {
+                clearTimeout(this._selectionDebounceTimer);
+            }
+            this._selectionDebounceTimer = setTimeout(() => {
+                this._selectionDebounceTimer = null;
+                this._doHandleSelection();
+            }, 300);
+        } else {
+            this._doHandleSelection();
+        }
+    }
+
+    /** Internal: actually process the current selection state. */
+    _doHandleSelection() {
         const view = this.app.workspace.getActiveViewOfType(MarkdownView);
         if (!view || view.getMode() !== "preview") {
             this.hide();
@@ -198,8 +237,17 @@ export class FloatingManager {
         if (snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
             const range = sel.getRangeAt(0);
             const rect = range.getBoundingClientRect();
+
+            // Cache the selection snapshot so toolbar actions can use it later
+            // (Android may clear the native selection when the user taps a button)
+            this._selectionSnapshot = {
+                text: snippet,
+                range: range.cloneRange(),
+            };
+
             this.show(rect);
         } else {
+            this._selectionSnapshot = null;
             this.hide();
         }
     }
@@ -223,15 +271,40 @@ export class FloatingManager {
             const containerHeight = 50;
             const containerWidth = this.plugin.settings.enableColorPalette ? 280 : 180;
 
-            let top = rect.top - containerHeight - 10;
-            let left = rect.left + (rect.width / 2) - (containerWidth / 2);
+            if (Platform.isAndroidApp) {
+                // ── Android: place toolbar BELOW the selection ──
+                // Android's native context menu (copy/paste/search) appears
+                // directly above the selection, so we place our toolbar below
+                // to avoid being hidden behind it.
+                const gap = 12;
+                let top = rect.bottom + gap;
+                let left = rect.left + (rect.width / 2) - (containerWidth / 2);
 
-            if (top < 10) top = rect.bottom + 10;
-            if (left < 10) left = 10;
-            if (left + containerWidth > window.innerWidth - 10) left = window.innerWidth - containerWidth - 10;
+                // If not enough room below, try above with extra clearance
+                // for the native menu (~50px for the menu itself)
+                if (top + containerHeight > window.innerHeight - 10) {
+                    top = rect.top - containerHeight - 60;
+                }
+                if (top < 10) top = 10;
+                if (left < 10) left = 10;
+                if (left + containerWidth > window.innerWidth - 10) {
+                    left = window.innerWidth - containerWidth - 10;
+                }
 
-            this.containerEl.style.top = `${top}px`;
-            this.containerEl.style.left = `${left}px`;
+                this.containerEl.style.top = `${top}px`;
+                this.containerEl.style.left = `${left}px`;
+            } else {
+                // ── iOS / Desktop: place toolbar ABOVE the selection (original) ──
+                let top = rect.top - containerHeight - 10;
+                let left = rect.left + (rect.width / 2) - (containerWidth / 2);
+
+                if (top < 10) top = rect.bottom + 10;
+                if (left < 10) left = 10;
+                if (left + containerWidth > window.innerWidth - 10) left = window.innerWidth - containerWidth - 10;
+
+                this.containerEl.style.top = `${top}px`;
+                this.containerEl.style.left = `${left}px`;
+            }
 
         } else if (pos === "top") {
             this.containerEl.style.top = "80px";

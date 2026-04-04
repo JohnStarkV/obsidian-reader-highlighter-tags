@@ -140,10 +140,15 @@ var FloatingManager = class {
     this.paletteContainer = null;
     this._handlers = [];
     this.longPressTimer = null;
+    this._selectionDebounceTimer = null;
+    this._selectionSnapshot = null;
   }
   load() {
     this.createElements();
     this.registerEvents();
+    if (import_obsidian.Platform.isMobile) {
+      this.setupMobileGestures();
+    }
   }
   unload() {
     var _a;
@@ -151,6 +156,10 @@ var FloatingManager = class {
     this.containerEl = null;
     this._handlers.forEach((cleanup) => cleanup());
     this._handlers = [];
+    if (this._selectionDebounceTimer) {
+      clearTimeout(this._selectionDebounceTimer);
+      this._selectionDebounceTimer = null;
+    }
   }
   refresh() {
     if (this.containerEl) {
@@ -222,7 +231,7 @@ var FloatingManager = class {
         preventFocus(evt);
         const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
         if (view && view.getMode() === "preview") {
-          this.plugin[actionName](view);
+          this.plugin[actionName](view, this._selectionSnapshot);
         }
         this.hide();
       };
@@ -239,7 +248,7 @@ var FloatingManager = class {
         preventFocus(evt);
         const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
         if (view && view.getMode() === "preview") {
-          this.plugin.applyColorByIndex(view, index);
+          this.plugin.applyColorByIndex(view, index, this._selectionSnapshot);
         }
         this.hide();
       };
@@ -247,8 +256,53 @@ var FloatingManager = class {
       btn.addEventListener("touchstart", handler, { passive: false });
     });
   }
-
+  setupMobileGestures() {
+    if (!import_obsidian.Platform.isIosApp)
+      return;
+    document.addEventListener("touchstart", (e) => {
+      this.longPressTimer = setTimeout(() => {
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+        const sel = window.getSelection();
+        if (view && view.getMode() === "preview" && (sel == null ? void 0 : sel.toString().trim())) {
+          this.plugin.highlightSelection(view);
+          this.hide();
+        }
+      }, 600);
+    }, { passive: true });
+    document.addEventListener("touchmove", () => {
+      if (this.longPressTimer) {
+        clearTimeout(this.longPressTimer);
+        this.longPressTimer = null;
+      }
+    }, { passive: true });
+    document.addEventListener("touchend", () => {
+      if (this.longPressTimer) {
+        clearTimeout(this.longPressTimer);
+        this.longPressTimer = null;
+      }
+    }, { passive: true });
+  }
+  /**
+   * Called on every `selectionchange` event.
+   * On Android the event fires per-word during a drag, so we debounce it
+   * to wait for the selection to settle before showing the toolbar.
+   * On iOS/Desktop we keep the original instant behaviour.
+   */
   handleSelection() {
+    if (import_obsidian.Platform.isAndroidApp) {
+      if (this._selectionDebounceTimer) {
+        clearTimeout(this._selectionDebounceTimer);
+      }
+      this._selectionDebounceTimer = setTimeout(() => {
+        this._selectionDebounceTimer = null;
+        this._doHandleSelection();
+      }, 300);
+    } else {
+      this._doHandleSelection();
+    }
+  }
+  /** Internal: actually process the current selection state. */
+  _doHandleSelection() {
     var _a;
     const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
     if (!view || view.getMode() !== "preview") {
@@ -260,8 +314,13 @@ var FloatingManager = class {
     if (snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
       const range = sel.getRangeAt(0);
       const rect = range.getBoundingClientRect();
+      this._selectionSnapshot = {
+        text: snippet,
+        range: range.cloneRange()
+      };
       this.show(rect);
     } else {
+      this._selectionSnapshot = null;
       this.hide();
     }
   }
@@ -279,16 +338,34 @@ var FloatingManager = class {
     if (pos === "text") {
       const containerHeight = 50;
       const containerWidth = this.plugin.settings.enableColorPalette ? 280 : 180;
-      let top = rect.top - containerHeight - 10;
-      let left = rect.left + rect.width / 2 - containerWidth / 2;
-      if (top < 10)
-        top = rect.bottom + 10;
-      if (left < 10)
-        left = 10;
-      if (left + containerWidth > window.innerWidth - 10)
-        left = window.innerWidth - containerWidth - 10;
-      this.containerEl.style.top = `${top}px`;
-      this.containerEl.style.left = `${left}px`;
+      if (import_obsidian.Platform.isAndroidApp) {
+        const gap = 12;
+        let top = rect.bottom + gap;
+        let left = rect.left + rect.width / 2 - containerWidth / 2;
+        if (top + containerHeight > window.innerHeight - 10) {
+          top = rect.top - containerHeight - 60;
+        }
+        if (top < 10)
+          top = 10;
+        if (left < 10)
+          left = 10;
+        if (left + containerWidth > window.innerWidth - 10) {
+          left = window.innerWidth - containerWidth - 10;
+        }
+        this.containerEl.style.top = `${top}px`;
+        this.containerEl.style.left = `${left}px`;
+      } else {
+        let top = rect.top - containerHeight - 10;
+        let left = rect.left + rect.width / 2 - containerWidth / 2;
+        if (top < 10)
+          top = rect.bottom + 10;
+        if (left < 10)
+          left = 10;
+        if (left + containerWidth > window.innerWidth - 10)
+          left = window.innerWidth - containerWidth - 10;
+        this.containerEl.style.top = `${top}px`;
+        this.containerEl.style.left = `${left}px`;
+      }
     } else if (pos === "top") {
       this.containerEl.style.top = "80px";
       this.containerEl.style.left = "50%";
@@ -1010,27 +1087,6 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     this.registerDomEvent(document, "selectionchange", () => {
       this.floatingManager.handleSelection();
     });
-    this.registerDomEvent(document, "click", (evt) => {
-      const target = evt.target;
-      if (!(target instanceof HTMLElement))
-        return;
-      const markEl = target.closest("mark");
-      if (!markEl)
-        return;
-      const view = this.getActiveReadingView();
-      if (!view)
-        return;
-      const sel = window.getSelection();
-      if (sel && !sel.isCollapsed)
-        return;
-      const previewEl = view.containerEl.querySelector(".markdown-reading-view") || view.containerEl.querySelector(".markdown-preview-view");
-      if (!previewEl || !previewEl.contains(markEl))
-        return;
-      const range = document.createRange();
-      range.selectNodeContents(markEl);
-      sel.removeAllRanges();
-      sel.addRange(range);
-    });
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
         this.floatingManager.handleSelection();
@@ -1277,10 +1333,10 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
       console.error(err);
     }
   }
-  async highlightSelection(view) {
-    var _a, _b;
+  async highlightSelection(view, selectionSnapshot) {
+    var _a;
     const sel = window.getSelection();
-    const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
+    const snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "";
     if (!snippet.trim()) {
       new import_obsidian5.Notice("No text selected.");
       return;
@@ -1305,21 +1361,20 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     this.restoreScroll(view, scrollPos);
     sel == null ? void 0 : sel.removeAllRanges();
     if (this.settings.enableHaptics && import_obsidian5.Platform.isMobile) {
-      (_b = navigator.vibrate) == null ? void 0 : _b.call(navigator, 10);
+      (_a = navigator.vibrate) == null ? void 0 : _a.call(navigator, 10);
     }
     new import_obsidian5.Notice("Highlighted!");
   }
   // Apply color by palette index
-  async applyColorByIndex(view, index) {
+  async applyColorByIndex(view, index, selectionSnapshot) {
     if (index < 0 || index >= this.settings.colorPalette.length)
       return;
     const palette = this.settings.colorPalette[index];
-    await this.applyColorHighlight(view, palette.color, palette.tag);
+    await this.applyColorHighlight(view, palette.color, palette.tag, selectionSnapshot);
   }
-  async tagSelection(view) {
-    var _a;
+  async tagSelection(view, selectionSnapshot) {
     const sel = window.getSelection();
-    const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
+    const snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "";
     if (!snippet.trim()) {
       new import_obsidian5.Notice("No text selected.");
       return;
@@ -1335,13 +1390,13 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
       return;
     }
     new TagSuggestModal(this, async (tag) => {
-      var _a2;
+      var _a;
       if (tag && this.settings.enableSmartTagSuggestions) {
         this.addRecentTag(tag);
       }
       await this.applyMarkdownModification(view.file, result.raw, result.start, result.end, "tag", tag);
       this.restoreScroll(view, scrollPos);
-      (_a2 = window.getSelection()) == null ? void 0 : _a2.removeAllRanges();
+      (_a = window.getSelection()) == null ? void 0 : _a.removeAllRanges();
     }).open();
   }
   // Add to recent tags
@@ -1357,10 +1412,9 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     this.saveSettings();
   }
   // Annotate selection with footnote
-  async annotateSelection(view) {
-    var _a;
+  async annotateSelection(view, selectionSnapshot) {
     const sel = window.getSelection();
-    const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
+    const snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "";
     if (!snippet.trim()) {
       new import_obsidian5.Notice("No text selected.");
       return;
@@ -1375,13 +1429,13 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
       return;
     }
     new AnnotationModal(this.app, async (comment) => {
-      var _a2;
+      var _a;
       if (!comment.trim())
         return;
       await this.saveUndoState(view.file);
       await this.applyAnnotation(view.file, result.raw, result.start, result.end, comment);
       this.restoreScroll(view, scrollPos);
-      (_a2 = window.getSelection()) == null ? void 0 : _a2.removeAllRanges();
+      (_a = window.getSelection()) == null ? void 0 : _a.removeAllRanges();
       new import_obsidian5.Notice("Annotation added!");
     }).open();
   }
@@ -1406,10 +1460,9 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     newContent = newContent.trimEnd() + footnoteDef + "\n";
     await this.app.vault.modify(file, newContent);
   }
-  async removeHighlightSelection(view) {
-    var _a;
+  async removeHighlightSelection(view, selectionSnapshot) {
     const sel = window.getSelection();
-    const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
+    const snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "";
     if (!snippet.trim()) {
       new import_obsidian5.Notice("Select highlighted text to remove.");
       return;
@@ -1452,10 +1505,9 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
       console.error(err);
     }
   }
-  async copyAsQuote(view) {
-    var _a;
+  async copyAsQuote(view, selectionSnapshot) {
     const sel = window.getSelection();
-    const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
+    const snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "";
     if (!snippet.trim()) {
       new import_obsidian5.Notice("No text selected.");
       return;
@@ -1466,10 +1518,9 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     new import_obsidian5.Notice("Copied as quote!");
     sel == null ? void 0 : sel.removeAllRanges();
   }
-  async applyColorHighlight(view, color, autoTag = "") {
-    var _a;
+  async applyColorHighlight(view, color, autoTag = "", selectionSnapshot) {
     const sel = window.getSelection();
-    const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
+    const snippet = (selectionSnapshot == null ? void 0 : selectionSnapshot.text) || (sel == null ? void 0 : sel.toString()) || "";
     if (!snippet.trim())
       return;
     const scrollPos = getScroll(view);

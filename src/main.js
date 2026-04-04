@@ -357,9 +357,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
         }
     }
 
-    async highlightSelection(view) {
+    async highlightSelection(view, selectionSnapshot) {
         const sel = window.getSelection();
-        const snippet = sel?.toString() ?? "";
+        const snippet = selectionSnapshot?.text || sel?.toString() || "";
         if (!snippet.trim()) {
             new Notice("No text selected.");
             return;
@@ -402,16 +402,16 @@ export default class ReadingHighlighterPlugin extends Plugin {
     }
 
     // Apply color by palette index
-    async applyColorByIndex(view, index) {
+    async applyColorByIndex(view, index, selectionSnapshot) {
         if (index < 0 || index >= this.settings.colorPalette.length) return;
 
         const palette = this.settings.colorPalette[index];
-        await this.applyColorHighlight(view, palette.color, palette.tag);
+        await this.applyColorHighlight(view, palette.color, palette.tag, selectionSnapshot);
     }
 
-    async tagSelection(view) {
+    async tagSelection(view, selectionSnapshot) {
         const sel = window.getSelection();
-        const snippet = sel?.toString() ?? "";
+        const snippet = selectionSnapshot?.text || sel?.toString() || "";
         if (!snippet.trim()) {
             new Notice("No text selected.");
             return;
@@ -464,9 +464,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
     }
 
     // Annotate selection with footnote
-    async annotateSelection(view) {
+    async annotateSelection(view, selectionSnapshot) {
         const sel = window.getSelection();
-        const snippet = sel?.toString() ?? "";
+        const snippet = selectionSnapshot?.text || sel?.toString() || "";
         if (!snippet.trim()) {
             new Notice("No text selected.");
             return;
@@ -528,9 +528,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
         await this.app.vault.modify(file, newContent);
     }
 
-    async removeHighlightSelection(view) {
+    async removeHighlightSelection(view, selectionSnapshot) {
         const sel = window.getSelection();
-        const snippet = sel?.toString() ?? "";
+        const snippet = selectionSnapshot?.text || sel?.toString() || "";
         if (!snippet.trim()) {
             new Notice("Select highlighted text to remove.");
             return;
@@ -593,9 +593,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
         }
     }
 
-    async copyAsQuote(view) {
+    async copyAsQuote(view, selectionSnapshot) {
         const sel = window.getSelection();
-        const snippet = sel?.toString() ?? "";
+        const snippet = selectionSnapshot?.text || sel?.toString() || "";
         if (!snippet.trim()) {
             new Notice("No text selected.");
             return;
@@ -616,9 +616,9 @@ export default class ReadingHighlighterPlugin extends Plugin {
         sel?.removeAllRanges();
     }
 
-    async applyColorHighlight(view, color, autoTag = "") {
+    async applyColorHighlight(view, color, autoTag = "", selectionSnapshot) {
         const sel = window.getSelection();
-        const snippet = sel?.toString() ?? "";
+        const snippet = selectionSnapshot?.text || sel?.toString() || "";
         if (!snippet.trim()) return;
 
         const scrollPos = getScroll(view);
