@@ -433,9 +433,18 @@ var SelectionLogic = class {
     }
     return { raw, start: candidates[0].start, end: candidates[0].end };
   }
+  createFlexiblePattern(escapedSnippet) {
+    let pattern = escapedSnippet.replace(/\\\[\d+(?:-\d+)?\\\]/g, "\\s*");
+    pattern = pattern.replace(/["“”]/g, '["\u201C\u201D]');
+    pattern = pattern.replace(/['‘’]/g, "['\u2018\u2019]");
+    pattern = pattern.replace(/[\-–—]/g, "[\\-\u2013\u2014]");
+    pattern = pattern.replace(/(\\\.\\\.\\\.|…)/g, "(\\\\.{3}|\u2026)");
+    pattern = pattern.replace(/\s+/g, "\\s*(?:(?:[>\\*\\-\\+]|\\d+\\.)(?: \\[[ xX]\\])?\\s*)*");
+    return pattern;
+  }
   findAllCandidates(text, snippet) {
     const escaped = snippet.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = escaped.replace(/\s+/g, "\\s+");
+    const pattern = this.createFlexiblePattern(escaped);
     const regex = new RegExp(pattern, "g");
     const candidates = [];
     let match;
@@ -490,10 +499,10 @@ var SelectionLogic = class {
       /(!\[(?:[^\]]*)\]\[(?:[^\]]*)\])/.source,
       // Group 3: Image with URL ![alt](url) or ![alt](url "title")
       /(!\[(?:[^\]]*)\]\((?:[^()"]*(?:\([^)]*\))?[^()"]*(?:"[^"]*")?)\))/.source,
-      // Group 4: Reference-style link [text][ref]
-      /(\[(?:[^\]]+)\]\[(?:[^\]]*)\])/.source,
-      // Group 5: Markdown link [text](url) or [text](url "title")
-      /(\[(?:[^\]]+)\]\((?:[^()"]*(?:\([^)]*\))?[^()"]*(?:"[^"]*")?)\))/.source,
+      // Group 4: Reference-style link [text][ref] (ensure it's not a footnote [^id])
+      /(\[(?!\^)(?:[^\]]+)\]\[(?:[^\]]*)\])/.source,
+      // Group 5: Markdown link [text](url) or [text](url "title") (ensure it's not a footnote [^id])
+      /(\[(?!\^)(?:[^\]]+)\]\((?:[^()"]*(?:\([^)]*\))?[^()"]*(?:"[^"]*")?)\))/.source,
       // Group 6: Wiki link [[...]]
       /(\[\[(?:[^\]]+)\]\])/.source,
       // Group 7: Footnote reference [^id]
@@ -581,9 +590,6 @@ var SelectionLogic = class {
           extractVisibleText(visibleStart, visibleEnd);
         }
       } else if (match[7]) {
-        const idStart = matchStart + 2;
-        const idEnd = matchStart + fullMatch.length - 1;
-        addRawText(idStart, idEnd);
       } else if (match[8]) {
         const mathStart = matchStart + 2;
         const mathEnd = matchStart + fullMatch.length - 2;
@@ -615,7 +621,7 @@ var SelectionLogic = class {
       strippedRaw += text[i];
     }
     const escaped = snippet.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = escaped.replace(/\s+/g, "\\s+");
+    const pattern = this.createFlexiblePattern(escaped);
     const regex = new RegExp(pattern, "g");
     const candidates = [];
     let strippedMatch;
@@ -1579,13 +1585,13 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
     while (expanded) {
       expanded = false;
       const preceding = raw.substring(0, expandedStart);
-      const matchBack = preceding.match(/(<mark[^>]*>|\*\*|==|~~|\*|_|\[\[|\[)$/);
+      const matchBack = preceding.match(/(<mark[^>]*>|\*\*|==|~~|\*|_|\[\[|\[\^[^\]]+\]|\[)$/);
       if (matchBack) {
         expandedStart -= matchBack[0].length;
         expanded = true;
       }
       const following = raw.substring(expandedEnd);
-      const matchForward = following.match(/^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\))/);
+      const matchForward = following.match(/^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\)|\[\^[^\]]+\])/);
       if (matchForward) {
         expandedEnd += matchForward[0].length;
         expanded = true;

@@ -67,9 +67,30 @@ export class SelectionLogic {
         return { raw, start: candidates[0].start, end: candidates[0].end };
     }
 
+    createFlexiblePattern(escapedSnippet) {
+        // Strip out any footnote-like bracketed numbers from the search pattern (e.g., \[1\] or \[1-1\])
+        // because we completely strip footnotes from strippedRaw, and Obsidian renders them inconsistently.
+        let pattern = escapedSnippet.replace(/\\\[\d+(?:-\d+)?\\\]/g, '\\s*');
+        
+        // Allow interchangeable smart and dumb quotes
+        pattern = pattern.replace(/["“”]/g, '["“”]');
+        pattern = pattern.replace(/['‘’]/g, "['‘’]");
+        // Allow interchangeable dashes
+        pattern = pattern.replace(/[\-–—]/g, "[\\-–—]");
+        // Allow interchangeable ellipses. Note: '.' is escaped to '\.' in escapedSnippet
+        pattern = pattern.replace(/(\\\.\\\.\\\.|…)/g, "(\\\\.{3}|…)");
+
+        // Allow flexible whitespace gaps. In Obsidian, a selected block of text may have newlines where the raw text
+        // has markdown prefixes like `- ` or `> ` or `1. `. By replacing spaces/newlines between words with a loose wildcard,
+        // we can absorb bullet points, quotes, and checkboxes that the browser's DOM selection omitted!
+        pattern = pattern.replace(/\s+/g, '\\s*(?:(?:[>\\*\\-\\+]|\\d+\\.)(?: \\[[ xX]\\])?\\s*)*');
+
+        return pattern;
+    }
+
     findAllCandidates(text, snippet) {
         const escaped = snippet.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const pattern = escaped.replace(/\s+/g, '\\s+');
+        const pattern = this.createFlexiblePattern(escaped);
 
         const regex = new RegExp(pattern, 'g');
         const candidates = [];
@@ -177,10 +198,10 @@ export class SelectionLogic {
             /(!\[(?:[^\]]*)\]\[(?:[^\]]*)\])/.source,
             // Group 3: Image with URL ![alt](url) or ![alt](url "title")
             /(!\[(?:[^\]]*)\]\((?:[^()"]*(?:\([^)]*\))?[^()"]*(?:"[^"]*")?)\))/.source,
-            // Group 4: Reference-style link [text][ref]
-            /(\[(?:[^\]]+)\]\[(?:[^\]]*)\])/.source,
-            // Group 5: Markdown link [text](url) or [text](url "title")
-            /(\[(?:[^\]]+)\]\((?:[^()"]*(?:\([^)]*\))?[^()"]*(?:"[^"]*")?)\))/.source,
+            // Group 4: Reference-style link [text][ref] (ensure it's not a footnote [^id])
+            /(\[(?!\^)(?:[^\]]+)\]\[(?:[^\]]*)\])/.source,
+            // Group 5: Markdown link [text](url) or [text](url "title") (ensure it's not a footnote [^id])
+            /(\[(?!\^)(?:[^\]]+)\]\((?:[^()"]*(?:\([^)]*\))?[^()"]*(?:"[^"]*")?)\))/.source,
             // Group 6: Wiki link [[...]]
             /(\[\[(?:[^\]]+)\]\])/.source,
             // Group 7: Footnote reference [^id]
@@ -287,11 +308,8 @@ export class SelectionLogic {
                 }
             } else if (match[7]) {
                 // FOOTNOTE REFERENCE: [^id]
-                // In rendered view, this typically shows as a superscript number
-                // We'll keep the ID for matching purposes
-                const idStart = matchStart + 2; // Skip '[^'
-                const idEnd = matchStart + fullMatch.length - 1; // Before ']'
-                addRawText(idStart, idEnd);
+                // We completely skip them so they don't appear in strippedRaw.
+                // Our flexiblePattern also strips rendered versions like [1] or [1-1].
             } else if (match[8]) {
                 // BLOCK MATH: $$...$$
                 // Keep the math content for matching
@@ -342,7 +360,7 @@ export class SelectionLogic {
 
         // Now search for snippet in strippedRaw
         const escaped = snippet.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const pattern = escaped.replace(/\s+/g, '\\s+');
+        const pattern = this.createFlexiblePattern(escaped);
         const regex = new RegExp(pattern, 'g');
 
         const candidates = [];

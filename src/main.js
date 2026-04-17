@@ -693,7 +693,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             expanded = false;
 
             const preceding = raw.substring(0, expandedStart);
-            const matchBack = preceding.match(/(<mark[^>]*>|\*\*|==|~~|\*|_|\[\[|\[)$/);
+            const matchBack = preceding.match(/(<mark[^>]*>|\*\*|==|~~|\*|_|\[\[|\[\^[^\]]+\]|\[)$/);
 
             if (matchBack) {
                 expandedStart -= matchBack[0].length;
@@ -701,7 +701,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
             }
 
             const following = raw.substring(expandedEnd);
-            const matchForward = following.match(/^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\))/);
+            const matchForward = following.match(/^(<\/mark>|\*\*|==|~~|\*|_|\]\]|\]\([^)]+\)|\[\^[^\]]+\])/);
 
             if (matchForward) {
                 expandedEnd += matchForward[0].length;
