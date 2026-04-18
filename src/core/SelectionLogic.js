@@ -237,22 +237,22 @@ export class SelectionLogic {
         return { raw, start: candidates[0].start, end: candidates[0].end };
     }
 
-    createFlexiblePattern(snippet) {
+ createFlexiblePattern(snippet) {
         // NON-BACKTRACKING GAP PATTERN
-        // This includes whitespace, arrows, markers, and Markdown symbols (*, _, ~, =).
-        const gapPattern = '[\\s\\u21a9\\u21b5\\ufe0e\\ufe0f\\d\\.\\[\\](){}\\^:>\\*\\+\\#\\u00a0_~=\\-\\|]';
+        // Includes whitespace, arrows, markers, and Markdown symbols.
+        // FIXED: Added em-dashes (\u2014), en-dashes (\u2013), and Spanish quotes (\u00ab, \u00bb).
+        const gapPattern = '[\\s\\u21a9\\u21b5\\ufe0e\\ufe0f\\d\\.\\[\\](){}\\^:>\\*\\+\\#\\u00a0_~=\\-\\|\\u2014\\u2013\\u00ab\\u00bb]';
         
         // TOKENIZED PATTERN BUILDER
-        // Every character in the snippet gets an optional gap after it to handle 
-        // disappearing Markdown markers (**, *, _, [^], etc.) anywhere.
         let parts = [];
         for (let i = 0; i < snippet.length; i++) {
             const char = snippet[i];
             
             if (char.match(/\s/)) {
-                // Collapse consecutive spaces into a single required gap
+                // FIXED: Space Hallucination Fix.
+                // Browsers inject ghost spaces near footnotes; making them optional (*?) resolves this.
                 if (parts.length > 0 && parts[parts.length-1].includes(gapPattern)) continue;
-                parts.push(`(?:${gapPattern})+?`);
+                parts.push(`(?:${gapPattern})*?`);
             } else {
                 parts.push(this.escapeRegex(char));
                 // Inject an optional gap after every character (Omni-Gap)
@@ -263,16 +263,6 @@ export class SelectionLogic {
         }
         
         const pattern = parts.join('');
-        
-        // Final pattern starts with optional MARKDOWN FORMATTING markers only.
-        // IMPORTANT: We intentionally use a narrower set here than gapPattern.
-        // gapPattern (used between characters) includes \s and \. which is fine
-        // mid-match, but a leading gap that includes those characters can consume
-        // the period + newlines at the end of a preceding paragraph, causing the
-        // match to start there instead of at the actual snippet start.
-        // This leading gap must only cover invisible inline formatting markers
-        // (**, *, _, ~~, ==, >, #, etc.) that precede the first visible character
-        // in raw Markdown but are absent from the user's rendered selection.
         const leadingMarkdownOnly = '[\\*_~=#>\\+\\|\\u21a9\\u21b5\\ufe0e\\ufe0f]';
         return `(?:${leadingMarkdownOnly})*?${pattern}`;
     }
@@ -285,7 +275,10 @@ export class SelectionLogic {
             .replace(/[\u21a9\u21b5\ufe0e\ufe0f]+/g, ' ') 
             // 2. Normalized whitespace
             .replace(/[\u00a0\s]+/g, ' ')
-            // 3. Bracketed markers like [why?], [PDF], [123] at line/selection edges
+            // 3. FIXED: Footnote index stripping.
+            // Removes standalone numbers that browsers copy from superscript markers.
+            .replace(/(^|\s)\d+(\s|$)/g, ' ')
+            // 4. Bracketed markers like [why?], [PDF], [123] at line/selection edges
             .replace(/\[(?:[0-9-]+|[a-zA-Z?]+)\](?=\s|$)/g, ' ')
             .replace(/\s+/g, ' ')
             .trim();
