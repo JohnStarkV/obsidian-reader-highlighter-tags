@@ -264,10 +264,15 @@ export class SelectionLogic {
         
         const pattern = parts.join('');
         
-        // Leading gap: only markdown formatting markers that could precede the first
-        // visible character in raw Markdown. Intentionally excludes \s and \. to
-        // prevent the regex from consuming a period + newlines at the end of a
-        // preceding paragraph and anchoring the match there instead of at the snippet.
+        // Final pattern starts with optional MARKDOWN FORMATTING markers only.
+        // IMPORTANT: We intentionally use a narrower set here than gapPattern.
+        // gapPattern (used between characters) includes \s and \. which is fine
+        // mid-match, but a leading gap that includes those characters can consume
+        // the period + newlines at the end of a preceding paragraph, causing the
+        // match to start there instead of at the actual snippet start.
+        // This leading gap must only cover invisible inline formatting markers
+        // (**, *, _, ~~, ==, >, #, etc.) that precede the first visible character
+        // in raw Markdown but are absent from the user's rendered selection.
         const leadingMarkdownOnly = '[\\*_~=#>\\+\\|\\u21a9\\u21b5\\ufe0e\\ufe0f]';
         return `(?:${leadingMarkdownOnly})*?${pattern}`;
     }
@@ -591,12 +596,16 @@ export class SelectionLogic {
                 // We completely skip them (including optional colon) so they don't appear in strippedRaw.
             } else if (match[9]) {
                 // BLOCK MATH: $$...$$
-                // Skip entirely. Rendered math symbols (θ, α, ∞) in the user's
-                // selection never match the LaTeX source. Skipping lets surrounding
-                // text bridge the gap via the normalizedSnippet step below.
+                // Keep the math content for matching
+                const mathStart = matchStart + 2;
+                const mathEnd = matchStart + fullMatch.length - 2;
+                addRawText(mathStart, mathEnd);
             } else if (match[10]) {
                 // INLINE MATH: $...$
-                // Same reason as block math above.
+                // Keep the math content for matching
+                const mathStart = matchStart + 1;
+                const mathEnd = matchStart + fullMatch.length - 1;
+                addRawText(mathStart, mathEnd);
             } else if (match[11]) {
                 // OBSIDIAN COMMENT: %%...%%
                 // Skip entirely - comments are hidden
@@ -641,24 +650,8 @@ export class SelectionLogic {
             strippedRaw += text[i];
         }
 
-        // Normalize math-rendered Unicode characters in the snippet.
-        // When a user selects rendered text, math symbols like θ (U+03B8), ≈ (U+2248),
-        // ⊙ (U+2299), ☽ (U+263D) appear in the snippet but the raw has LaTeX ($\theta$).
-        // We skipped math from strippedRaw above, so both sides now have a gap where
-        // math was. Replacing the rendered symbols with a space makes them match.
-        // Ranges: Greek (\u0370-\u03FF), Letterlike (\u2100-\u214F),
-        //         Math Operators (\u2200-\u22FF), Misc Symbols (\u2600-\u27BF),
-        //         Supplemental Math (\u2980-\u29FF).
-        // NOTE: Only runs in the stripped fallback — legitimate Greek prose matches
-        // correctly via findAllCandidates (the first-pass search).
-        const mathRenderedCharPattern = /[\u0370-\u03FF\u2100-\u214F\u2200-\u22FF\u2600-\u27BF\u2980-\u29FF]+/g;
-        const normalizedSnippet = snippet.trim()
-            .replace(mathRenderedCharPattern, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-
-        // Now search for normalizedSnippet in strippedRaw
-        const pattern = this.createFlexiblePattern(normalizedSnippet);
+        // Now search for snippet in strippedRaw
+        const pattern = this.createFlexiblePattern(snippet.trim());
         const regex = new RegExp(pattern, 'g');
 
         const candidates = [];
@@ -685,34 +678,6 @@ export class SelectionLogic {
         }
 
         return candidates;
-    }
-
-    /**
-     * Adjusts highlight bounds to preserve Markdown syntax that would be broken
-     * by inserting == at the raw start position.
-     *
-     * Call in main.js after re-reading the file and after the expansion loop,
-     * right before inserting the == markers:
-     *
-     *   ({ start: expandedStart, end: expandedEnd } =
-     *       this.logic.adjustHighlightBounds(raw, expandedStart, expandedEnd));
-     *
-     * Case handled:
-     * FOOTNOTE DEFINITIONS  [^id]: body text
-     *   Placing == before [^id] breaks the footnote parser. We advance start
-     *   to just after the label so the output is: [^id]: ==body text==
-     *   In-body references [^id] are unaffected — they are never at column 0
-     *   with a colon, so the guard never fires.
-     */
-    adjustHighlightBounds(content, start, end) {
-        const lineStart = content.lastIndexOf('\n', start - 1) + 1;
-        if (start === lineStart) {
-            const footnoteDefMatch = content.substring(lineStart).match(/^\[\^[^\]]+\]:\s*/);
-            if (footnoteDefMatch) {
-                start = lineStart + footnoteDefMatch[0].length;
-            }
-        }
-        return { start, end };
     }
 
     calculateSimilarity(source, target) {

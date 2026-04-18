@@ -573,8 +573,7 @@ var SelectionLogic = class {
       }
     }
     const pattern = parts.join("");
-    const leadingMarkdownOnly = '[\\*_~=#>\\+\\|\\u21a9\\u21b5\\ufe0e\\ufe0f]';
-    return `(?:${leadingMarkdownOnly})*?${pattern}`;
+    return `(?:${gapPattern})*?${pattern}`;
   }
   stripBrowserJunk(text) {
     if (!text)
@@ -790,7 +789,13 @@ var SelectionLogic = class {
         }
       } else if (match[8]) {
       } else if (match[9]) {
+        const mathStart = matchStart + 2;
+        const mathEnd = matchStart + fullMatch.length - 2;
+        addRawText(mathStart, mathEnd);
       } else if (match[10]) {
+        const mathStart = matchStart + 1;
+        const mathEnd = matchStart + fullMatch.length - 1;
+        addRawText(mathStart, mathEnd);
       } else if (match[11]) {
       } else if (match[12]) {
         const codeStart = matchStart + 1;
@@ -817,9 +822,7 @@ var SelectionLogic = class {
       map.push(i);
       strippedRaw += text[i];
     }
-    const mathRenderedCharPattern = /[\u0370-\u03FF\u2100-\u214F\u2200-\u22FF\u2600-\u27BF\u2980-\u29FF]+/g;
-    const normalizedSnippet = snippet.trim().replace(mathRenderedCharPattern, " ").replace(/\s+/g, " ").trim();
-    const pattern = this.createFlexiblePattern(normalizedSnippet);
+    const pattern = this.createFlexiblePattern(snippet.trim());
     const regex = new RegExp(pattern, "g");
     const candidates = [];
     let strippedMatch;
@@ -840,16 +843,6 @@ var SelectionLogic = class {
       });
     }
     return candidates;
-  }
-  adjustHighlightBounds(content, start, end) {
-    const lineStart = content.lastIndexOf("\n", start - 1) + 1;
-    if (start === lineStart) {
-      const footnoteDefMatch = content.substring(lineStart).match(/^\[\^[^\]]+\]:\s*/);
-      if (footnoteDefMatch) {
-        start = lineStart + footnoteDefMatch[0].length;
-      }
-    }
-    return { start, end };
   }
   calculateSimilarity(source, target) {
     if (source === target)
@@ -1830,7 +1823,6 @@ var ReadingHighlighterPlugin = class extends import_obsidian5.Plugin {
         expanded = true;
       }
     }
-    ({ start: expandedStart, end: expandedEnd } = this.logic.adjustHighlightBounds(raw, expandedStart, expandedEnd));
     const selectedText = raw.substring(expandedStart, expandedEnd);
     const paragraphs = selectedText.split(/\r?\n\s*\r?\n/);
     let fullTag = "";
