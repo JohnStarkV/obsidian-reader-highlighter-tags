@@ -264,17 +264,8 @@ export class SelectionLogic {
         
         const pattern = parts.join('');
         
-        // Final pattern starts with optional MARKDOWN FORMATTING markers only.
-        // IMPORTANT: We intentionally use a narrower set here than gapPattern.
-        // gapPattern (used between characters) includes \s and \. which is fine
-        // mid-match, but a leading gap that includes those characters can consume
-        // the period + newlines at the end of a preceding paragraph, causing the
-        // match to start there instead of at the actual snippet start.
-        // This leading gap must only cover invisible inline formatting markers
-        // (**, *, _, ~~, ==, >, #, etc.) that precede the first visible character
-        // in raw Markdown but are absent from the user's rendered selection.
-        const leadingMarkdownOnly = '[\\*_~=#>\\+\\|\\u21a9\\u21b5\\ufe0e\\ufe0f]';
-        return `(?:${leadingMarkdownOnly})*?${pattern}`;
+        // Final pattern starts with optional markers/whitespace (Atomic)
+        return `(?:${gapPattern})*?${pattern}`;
     }
 
     stripBrowserJunk(text) {
@@ -596,16 +587,14 @@ export class SelectionLogic {
                 // We completely skip them (including optional colon) so they don't appear in strippedRaw.
             } else if (match[9]) {
                 // BLOCK MATH: $$...$$
-                // Keep the math content for matching
-                const mathStart = matchStart + 2;
-                const mathEnd = matchStart + fullMatch.length - 2;
-                addRawText(mathStart, mathEnd);
+                // Skip entirely. When the user selects rendered text, math symbols
+                // like θ or ∞ appear in the snippet but the raw has LaTeX ($\theta$).
+                // Keeping the LaTeX causes a guaranteed mismatch. By skipping, the
+                // surrounding words stay adjacent in strippedRaw, and the snippet
+                // is normalized symmetrically (see normalizedSnippet below).
             } else if (match[10]) {
                 // INLINE MATH: $...$
-                // Keep the math content for matching
-                const mathStart = matchStart + 1;
-                const mathEnd = matchStart + fullMatch.length - 1;
-                addRawText(mathStart, mathEnd);
+                // Same reason as block math above.
             } else if (match[11]) {
                 // OBSIDIAN COMMENT: %%...%%
                 // Skip entirely - comments are hidden
@@ -650,8 +639,34 @@ export class SelectionLogic {
             strippedRaw += text[i];
         }
 
-        // Now search for snippet in strippedRaw
-        const pattern = this.createFlexiblePattern(snippet.trim());
+        // Normalize math-rendered Unicode characters in the snippet before searching.
+        //
+        // When a user selects rendered text containing inline math, their selection
+        // contains rendered symbols (e.g. θ U+03B8, ≈ U+2248, ⊙ U+2299, ☽ U+263D)
+        // while the raw markdown has LaTeX ($\theta$, $\approx$, etc.).
+        //
+        // We've already skipped math from strippedRaw (Groups 9 and 10 above), so both
+        // sides now have a gap where math was. Replacing rendered symbols here with a
+        // space makes the snippet gap match strippedRaw, letting surrounding plain text
+        // anchor the match correctly.
+        //
+        // Ranges covered:
+        //   \u0370-\u03FF  Greek & Coptic (θ, α, β, φ …)
+        //   \u2100-\u214F  Letterlike Symbols (ℝ, ℂ …)
+        //   \u2200-\u22FF  Mathematical Operators (≈, ∞, ⊙, ∑ …)
+        //   \u2600-\u27BF  Misc Symbols & Math (☽, ★ …)
+        //   \u2980-\u29FF  Supplemental Math Operators
+        //
+        // NOTE: This only runs in the stripped fallback path, so legitimate Greek prose
+        // still matches correctly via findAllCandidates (the first-pass search).
+        const mathRenderedCharPattern = /[\u0370-\u03FF\u2100-\u214F\u2200-\u22FF\u2600-\u27BF\u2980-\u29FF]+/g;
+        const normalizedSnippet = snippet.trim()
+            .replace(mathRenderedCharPattern, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        // Now search for normalizedSnippet in strippedRaw
+        const pattern = this.createFlexiblePattern(normalizedSnippet);
         const regex = new RegExp(pattern, 'g');
 
         const candidates = [];
